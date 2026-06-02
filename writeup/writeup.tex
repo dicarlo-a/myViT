@@ -85,14 +85,72 @@
 
     \item infonce: The loss is averaged in both directions because each (image, text) pair should serve as a positive for both retrieval directions---finding the right caption given an image, and the right image given a caption. Using only one direction would bias the model toward one retrieval mode and leave half the pairwise supervision signal in each batch unused.
 
-    \item clip\_train: \textit{(to be completed after training run)}
+    \item clip\_train:
 
-    % Deliverables: (a) training-loss curve, (b) zero-shot val-accuracy curve,
-    % (c) 2-3 sentences on how the two curves relate.
+    \begin{figure}[h]
+    \centering
+    \includegraphics[width=0.48\textwidth]{../runs/clip_eurosat/loss_curve.png}
+    \includegraphics[width=0.48\textwidth]{../runs/clip_eurosat/acc_curve.png}
+    \caption{Left: mean training loss per epoch. Right: zero-shot validation accuracy per epoch. EuroSAT, 20 epochs, A100 GPU.}
+    \end{figure}
 
-    \item clip\_zeroshot: \textit{(to be completed after training run)}
+    Validation accuracy rises steeply during the first eight epochs (53\% $\to$ 87\%), then continues to improve at a diminishing rate before plateauing near 91\% from epoch 17 onward. Training loss, by contrast, decreases monotonically throughout all 20 epochs---including the final epochs where accuracy is essentially flat---indicating the model keeps tightening image--text alignment on training pairs past the point of diminishing returns for zero-shot classification. This is expected under EuroSAT's class-template captions: many examples per batch share the same caption, so the loss can still improve by better separating near-duplicate positives even after the coarser class-level decision boundaries are learned.
 
-    % Deliverable: 10 example images with predicted labels and 3-4 sentence discussion.
+    \item clip\_zeroshot:
+
+    \begin{center}
+    \includegraphics[width=\textwidth]{../runs/clip_eurosat/zeroshot_examples.png}
+    \end{center}
+
+    Nearly all errors are reasonable confusions between visually similar classes: the four agricultural/vegetation categories (Pasture, Herbaceous Vegetation, Annual Crop, Permanent Crop) appear as low-texture green patches at $64\times64$ resolution, making them hard to distinguish, and Industrial Buildings versus Residential Buildings are both regular grids of rooftops separated by roads. The one surprising error is Annual Crop predicted as Highway: at this resolution, the parallel furrows of a ploughed field closely resemble lane markings on a multi-lane road. Because all five wrong predictions still place the correct class in the top-3, the mistakes reflect genuine local ambiguity rather than a failure of the embedding space: the model has learned semantically coherent clusters (``green land,'' ``built environment,'' ``water'') but struggles to separate fine-grained classes within each cluster.
+
+\end{enumerate}
+\end{question}
+
+\begin{question}{LoRA Fine-Tuning}
+\begin{enumerate}[label=(\alph*)]
+
+    \item lora\_linear: Applying LoRA (rank 8, $\alpha=16$) to every \texttt{q\_proj} and \texttt{v\_proj} in the ViT and adding a 45-way classification head gives the following parameter breakdown:
+
+    \begin{center}
+    \begin{tabular}{lr}
+    \toprule
+    & Count \\
+    \midrule
+    Total parameters         & 10,755,117 \\
+    Trainable parameters     &    275,373 \\
+    \quad of which LoRA A/B  &    258,048 \\
+    \quad of which head      &     17,325 \\
+    Trainable / Total        &      2.56\% \\
+    \bottomrule
+    \end{tabular}
+    \end{center}
+
+    The LoRA count follows from 36 adapted heads (6 heads $\times$ 6 blocks), each contributing $2 \times (r \cdot d_\text{model} + d_\text{head} \cdot r) = 2 \times (8 \cdot 384 + 64 \cdot 8) = 7{,}168$ parameters, giving $36 \times 7{,}168 = 258{,}048$.
+
+    \item lora\_compare:
+
+    \begin{center}
+    \begin{tabular}{lrrrr}
+    \toprule
+    Method & Test Acc & Trainable Params & Peak Mem (MB) & Time (s) \\
+    \midrule
+    Linear probe & \textit{TBD} & 17,325 & \textit{TBD} & \textit{TBD} \\
+    LoRA ($r=8$, $\alpha=16$) & \textit{TBD} & 275,373 & \textit{TBD} & \textit{TBD} \\
+    Full fine-tuning & \textit{TBD} & 10,755,117 & \textit{TBD} & \textit{TBD} \\
+    \bottomrule
+    \end{tabular}
+    \end{center}
+
+    \textit{Discussion TBD after Colab training run.}
+
+    \item lora\_rank:
+
+    \begin{center}
+    \includegraphics[width=0.7\textwidth]{../runs/resisc_rank_sweep/rank_sweep.png}
+    \end{center}
+
+    \textit{Discussion TBD after Colab rank-sweep run.}
 
 \end{enumerate}
 \end{question}

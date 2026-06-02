@@ -1,0 +1,100 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath, amsfonts, amssymb, amstext, amscd, amsthm, makeidx, graphicx, hyperref, url, enumitem, geometry, booktabs, multirow}
+
+\newenvironment{question}[1]
+    {
+        \begin{center}
+        \textbf{#1} \rmfamily
+        \bigskip
+        \hrule
+    }
+    {
+        \end{center}
+    }
+
+\setlength{\textheight}{22.5cm}
+\geometry{
+    lmargin = 1in,
+    rmargin = 1in
+}
+\setlength{\topmargin}{0pt}
+\setlength{\headsep}{1pt}
+\setlength{\parskip}{1mm}
+\setlength{\parindent}{0mm}
+\renewcommand{\baselinestretch}{1.03}
+
+\newcommand{\unitfrac}[4]{\frac{#1 \text{ #2}}{#3 \text{ #4}}}
+
+
+\title{\vspace{-0.7cm}EE/CS 148B - Homework 3}
+\date{\today}
+\author{Aiden Di Carlo}
+
+\begin{document}
+
+\maketitle
+
+\begin{question}{Vision Transformer}
+\begin{enumerate}[label=(\alph*)]
+
+    \item vit\_pooling: For tasks requiring spatial reasoning, attention pooling is expected to perform best because it can learn to weight tokens selectively based on task-relevant spatial cues, rather than treating all positions equally (mean pooling) or relying on a single generic summary (CLS). Mean pooling discards per-patch identity by averaging, which collapses distinctions between, say, a red cube on the left versus the right; the CLS token suffers the same problem more acutely, since it is trained to summarize global semantics and does not preserve fine-grained spatial layout at all. When an entire image is condensed into a single CLS vector before being passed to a language model, all explicit positional relationships between objects are lost. The model receives no direct signal about where each object is, only a holistic blend of what is in the image.
+
+    \item vit\_patch\_size:
+
+    \textbf{(1) Patch counts and attention cost.}
+    For a $224\times224$ image the number of patches is $N=(224/P)^2$:
+
+    \begin{center}
+    \begin{tabular}{cc}
+    \toprule
+    $P$ & $N$ \\
+    \midrule
+    8  & 784 \\
+    16 & 196 \\
+    32 &  49 \\
+    \bottomrule
+    \end{tabular}
+    \end{center}
+
+    Self-attention scales as $O(N^2 d_\text{model})$, and $N \propto P^{-2}$. Thus, the overall cost scales as $O(P^{-4} d_\text{model})$. Halving the patch size increases attention compute by $2^4 = 16\times$, so shrinking $P$ is extremely expensive.
+
+    \textbf{(2) Wall-clock times} (batch of 16 images, $d_\text{model}=384$, 6 heads, 6 blocks; RTX 4070 Laptop GPU; 5 warmup + 20 timed steps):
+
+    \begin{center}
+    \begin{tabular}{ccc}
+    \toprule
+    $P$ & Mean (ms) & Std (ms) \\
+    \midrule
+    8  & 84.9 & 1.8 \\
+    16 & 14.8 & 1.3 \\
+    32 & 10.1 & 1.3 \\
+    \bottomrule
+    \end{tabular}
+    \end{center}
+
+    The empirical ratios ($8.4\times$ between $P=8$ and $P=16$, and $1.5\times$ between $P=16$ and $P=32$) are smaller than the theoretical $16\times$ and $256\times$ because the GPU is compute-bound only for the largest sequence length; at $P=16$ and $P=32$ the bottleneck shifts to memory bandwidth and kernel launch overhead, compressing the observed differences. The $P=8$ overhead, roughly $8\times$ slower than $P=16$, confirms that the quadratic attention term dominates at high patch counts.
+
+    \textbf{(3)} Accept smaller patches when fine-grained spatial fidelity is critical and the compute budget allows it (e.g., OCR, dense prediction, or counting small objects where coarser tokens would merge distinct features).
+
+\end{enumerate}
+\end{question}
+
+\begin{question}{CLIP-Style Contrastive Pretraining}
+\begin{enumerate}[label=(\alph*)]
+
+    \item infonce: The loss is averaged in both directions because each (image, text) pair should serve as a positive for both retrieval directions---finding the right caption given an image, and the right image given a caption. Using only one direction would bias the model toward one retrieval mode and leave half the pairwise supervision signal in each batch unused.
+
+    \item clip\_train: \textit{(to be completed after training run)}
+
+    % Deliverables: (a) training-loss curve, (b) zero-shot val-accuracy curve,
+    % (c) 2-3 sentences on how the two curves relate.
+
+    \item clip\_zeroshot: \textit{(to be completed after training run)}
+
+    % Deliverable: 10 example images with predicted labels and 3-4 sentence discussion.
+
+\end{enumerate}
+\end{question}
+
+\end{document}

@@ -17,12 +17,10 @@ import json
 import time
 from pathlib import Path
 
-import sys
-
 import torch
 import torch.nn as nn
 import yaml
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +312,7 @@ def main() -> None:
     optimizer.zero_grad()
     t0 = time.time()
 
-    pbar = tqdm(total=num_steps, desc="Training", file=sys.stdout, dynamic_ncols=True)
+    pbar = tqdm(total=num_steps, desc="Training")
     while step < num_steps:
         vlm.train()
         accum_loss = 0.0
@@ -347,8 +345,7 @@ def main() -> None:
         if step % log_every == 0:
             elapsed = time.time() - t0
             tqdm.write(f"Step {step:4d}/{num_steps}  loss={accum_loss:.4f}  "
-                       f"grad_norm={grad_norm:.3f}  elapsed={elapsed:.0f}s",
-                       file=sys.stdout)
+                       f"grad_norm={grad_norm:.3f}  elapsed={elapsed:.0f}s")
 
         if step % eval_every == 0 or step == num_steps:
             metrics = eval_vlm(vlm, val_dl, tokenizer, args.injection, args.mask_mode,
@@ -358,8 +355,7 @@ def main() -> None:
                         if device.type == "cuda" else 0.0)
             elapsed = time.time() - t0
             tqdm.write(f"  [eval step={step}] val_acc={val_acc:.4f}  "
-                       f"peak_mem={peak_mem:.1f} MB  elapsed={elapsed:.0f}s",
-                       file=sys.stdout)
+                       f"peak_mem={peak_mem:.1f} MB  elapsed={elapsed:.0f}s")
             history.append({"step": step, "val_acc": val_acc,
                              "peak_mem_mb": round(peak_mem, 1),
                              "elapsed_s": round(elapsed, 1)})

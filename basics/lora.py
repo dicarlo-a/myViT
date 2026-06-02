@@ -49,7 +49,11 @@ class LoRALinear(nn.Module):
         nn.init.kaiming_uniform_(self.A, a=math.sqrt(5))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.base_layer(x) + self.scaling * (x @ self.A.T @ self.B.T)
+        # Cast A and B to x's dtype so LoRALinear works when x is bfloat16
+        # (e.g., when wrapping SmolLM2 layers) while A/B are stored as float32.
+        A = self.A.to(dtype=x.dtype)
+        B = self.B.to(dtype=x.dtype)
+        return self.base_layer(x) + self.scaling * (x @ A.T @ B.T)
 
 
 def apply_lora_to_attention(model: nn.Module, rank: int, alpha: float) -> nn.Module:

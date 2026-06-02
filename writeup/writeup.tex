@@ -117,16 +117,16 @@
     \toprule
     & Count \\
     \midrule
-    Total parameters         & 10,755,117 \\
+    Total parameters         & 11,013,165 \\
     Trainable parameters     &    275,373 \\
     \quad of which LoRA A/B  &    258,048 \\
     \quad of which head      &     17,325 \\
-    Trainable / Total        &      2.56\% \\
+    Trainable / Total        &      2.50\% \\
     \bottomrule
     \end{tabular}
     \end{center}
 
-    The LoRA count follows from 36 adapted heads (6 heads $\times$ 6 blocks), each contributing $2 \times (r \cdot d_\text{model} + d_\text{head} \cdot r) = 2 \times (8 \cdot 384 + 64 \cdot 8) = 7{,}168$ parameters, giving $36 \times 7{,}168 = 258{,}048$.
+    The LoRA count follows from 36 adapted heads (6 heads $\times$ 6 blocks), each contributing $2 \times (r \cdot d_\text{model} + d_\text{head} \cdot r) = 2 \times (8 \cdot 384 + 64 \cdot 8) = 7{,}168$ parameters, giving $36 \times 7{,}168 = 258{,}048$. Total parameters for LoRA exceeds the base model (10,755,117) by exactly this amount.
 
     \item lora\_compare:
 
@@ -135,14 +135,14 @@
     \toprule
     Method & Test Acc & Trainable Params & Peak Mem (MB) & Time (s) \\
     \midrule
-    Linear probe & \textit{TBD} & 17,325 & \textit{TBD} & \textit{TBD} \\
-    LoRA ($r=8$, $\alpha=16$) & \textit{TBD} & 275,373 & \textit{TBD} & \textit{TBD} \\
-    Full fine-tuning & \textit{TBD} & 10,755,117 & \textit{TBD} & \textit{TBD} \\
+    Linear probe              & 37.95\% &     17,325 &   260.7 & 105.4 \\
+    LoRA ($r=8$, $\alpha=16$) & 41.44\% &    275,373 & 1,210.7 & 139.0 \\
+    Full fine-tuning          & 63.78\% & 10,755,117 & 1,760.5 & 121.6 \\
     \bottomrule
     \end{tabular}
     \end{center}
 
-    \textit{Discussion TBD after Colab training run.}
+    Full fine-tuning achieves the highest accuracy (63.8\%) by a large margin because EuroSAT and RESISC45 differ substantially in class structure (10 vs.\ 45 classes, multispectral satellite vs.\ aerial RGB imagery), so the frozen EuroSAT representation transfers imperfectly and requires intermediate features---not just the final head---to be updated. LoRA outperforms the linear probe by 3.5 percentage points despite training only $16\times$ more parameters (275K vs.\ 17K), showing that adapting the attention Q/V projections yields a more flexible adjustment of the representation than a frozen linear readout. Peak memory follows the amount of stored activations during backpropagation: linear probe requires no gradient to pass through the ViT (261~MB), while LoRA and full fine-tuning both backpropagate through every block (1,211~MB and 1,761~MB), with full fine-tuning's extra overhead coming from larger optimizer states for its 10M trainable parameters. Training times are similar across methods (105--139~s) because all three run the same forward pass through the ViT; the LoRA backward is nearly as expensive as full fine-tuning since gradients must still flow through all blocks to reach the A and B matrices.
 
     \item lora\_rank:
 
@@ -150,7 +150,7 @@
     \includegraphics[width=0.7\textwidth]{../runs/resisc_rank_sweep/rank_sweep.png}
     \end{center}
 
-    \textit{Discussion TBD after Colab rank-sweep run.}
+    Accuracy increases monotonically across all seven ranks (32.7\%, 35.3\%, 38.0\%, 41.1\%, 44.4\%, 47.1\%, 49.5\% for $r = 1, 2, 4, 8, 16, 32, 64$), with per-doubling gains of roughly 2.4--3.3 percentage points. The curve is approximately log-linear. In large language models ($d_\text{model} \gg 10^3$), $r = 8$ or $r = 16$ is sufficient because the fine-tuning update is empirically very low-rank relative to the enormous weight matrices---the few most salient adaptation directions capture almost all of the needed shift. Our ViT has $d_\text{model}=384$ and is adapting across a substantial domain gap (10-class EuroSAT satellite imagery $\to$ 45-class RESISC45 aerial imagery), so the effective rank of the update is higher relative to $d_\text{model}$: the model must adjust a broader subspace of its attention projections to separate 45 visually diverse classes, and even $r=64$ (one-sixth of $d_\text{model}$) has not exhausted the useful adaptation directions.
 
 \end{enumerate}
 \end{question}

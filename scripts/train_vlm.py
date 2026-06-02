@@ -216,10 +216,17 @@ def main() -> None:
     model_name = cfg["decoder"]["model_name"]
     torch_dtype = getattr(torch, cfg["decoder"]["torch_dtype"])
 
-    # image_bidir mask requires non-FA2 attention (FA2 doesn't accept 4D masks).
+    # image_bidir mask requires non-FA2 attention (FA2 doesn't accept 4D additive masks).
+    # Also fall back to sdpa when flash_attn is not installed.
     attn_impl = cfg["decoder"]["attn_implementation"]
+    if attn_impl == "flash_attention_2":
+        try:
+            import flash_attn  # noqa: F401
+        except ImportError:
+            attn_impl = "sdpa"
     if args.mask_mode == "image_bidir":
         attn_impl = "sdpa"
+    print(f"attn_impl: {attn_impl}")
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     tokenizer.padding_side = "right"

@@ -58,8 +58,15 @@ def load_vlm(ckpt_path: Path, device: torch.device):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Use SDPA for compatibility with custom 4D masks.
-    attn_impl = "sdpa" if mask_mode == "image_bidir" else "flash_attention_2"
+    # Use SDPA for image_bidir (4D masks) or when flash_attn is not installed.
+    attn_impl = "flash_attention_2"
+    if mask_mode == "image_bidir":
+        attn_impl = "sdpa"
+    elif attn_impl == "flash_attention_2":
+        try:
+            import flash_attn  # noqa: F401
+        except ImportError:
+            attn_impl = "sdpa"
     decoder = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.bfloat16,

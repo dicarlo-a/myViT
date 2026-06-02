@@ -42,9 +42,10 @@ class LoRALinear(nn.Module):
 
         d_in = base_layer.in_features
         d_out = base_layer.out_features
+        device = base_layer.weight.device
 
-        self.A = nn.Parameter(torch.empty(rank, d_in))
-        self.B = nn.Parameter(torch.zeros(d_out, rank))
+        self.A = nn.Parameter(torch.empty(rank, d_in, device=device))
+        self.B = nn.Parameter(torch.zeros(d_out, rank, device=device))
         nn.init.kaiming_uniform_(self.A, a=math.sqrt(5))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

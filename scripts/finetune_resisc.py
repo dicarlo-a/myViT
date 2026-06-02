@@ -72,6 +72,7 @@ def build_model(ckpt, method: str, rank: int, alpha: float, num_classes: int, de
 
     elif method == "lora":
         apply_lora_to_attention(vit, rank, alpha)  # freezes all existing, adds trainable A, B
+        vit.to(device)  # A, B may have been created on CPU; re-apply device
         train_params = [p for p in vit.parameters() if p.requires_grad] + list(head.parameters())
 
     else:  # full_ft

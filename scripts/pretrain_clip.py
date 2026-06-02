@@ -2,6 +2,8 @@
 
 Usage:
     uv run python scripts/pretrain_clip.py --config configs/clip_eurosat.yaml
+    uv run python scripts/pretrain_clip.py --config configs/clip_eurosat.yaml --pos-encoding rope1d --output-dir runs/rope_1d
+    uv run python scripts/pretrain_clip.py --config configs/clip_eurosat.yaml --pos-encoding rope2d --output-dir runs/rope_2d
 """
 
 from __future__ import annotations
@@ -26,6 +28,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-dir", type=Path, default=Path("runs/clip_eurosat"))
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--wandb", action="store_true", help="Log to W&B")
+    p.add_argument(
+        "--pos-encoding",
+        choices=["learned", "rope1d", "rope2d"],
+        default="learned",
+        help="Positional encoding for the ViT (default: learned).",
+    )
     return p.parse_args()
 
 
@@ -59,9 +67,12 @@ def main() -> None:
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
+    # Inject pos_encoding into vit config so it's saved with the checkpoint.
+    cfg["vit"]["pos_encoding"] = args.pos_encoding
+
     args.output_dir.mkdir(parents=True, exist_ok=True)
     device = torch.device(args.device)
-    print(f"Device: {device}")
+    print(f"Device: {device}  |  pos_encoding: {args.pos_encoding}")
 
     if args.wandb:
         import wandb
@@ -211,8 +222,35 @@ def main() -> None:
     print(f"\nTraining done. Best val acc: {best_acc:.4f}")
     print(f"Outputs saved to: {args.output_dir}/")
 
+    # ── Length-extrapolation evaluation ───────────────────────────────────────
+    # Load best checkpoint weights for fair comparison.
+    best_ckpt = torch.load(args.output_dir / "best.pt", map_location=device, weights_only=False)
+    vit.load_state_dict(best_ckpt["vit"])
+    proj_heads.load_state_dict(best_ckpt["proj_heads"])
+    vit.eval()
+    proj_heads.eval()
+
+    # Build a val loader that serves 96×96 images → 12×12 = 144 patches.
+    _, val_96_dl, _ = build_eurosat_loaders(
+        img_size=96,
+        batch_size=cfg["train"]["batch_size"],
+        num_workers=cfg["train"]["num_workers"],
+    )
+
+    extrap_acc = zeroshot_classification_accuracy(
+        vit, proj_heads, text_encoder, val_96_dl,
+        class_prompts, class_indices, device,
+    )
+    print(f"\nExtrapolation (96×96, 144 patches): val_acc={extrap_acc:.4f}")
+
+    metrics["train_val_acc"] = best_acc
+    metrics["extrap_val_acc"] = extrap_acc
+    with open(args.output_dir / "metrics.json", "w") as f:
+        json.dump(metrics, f, indent=2)
+
     if args.wandb:
         import wandb
+        wandb.log({"extrap/val_acc": extrap_acc})
         wandb.finish()
 
 

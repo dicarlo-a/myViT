@@ -39,6 +39,9 @@ def parse_args() -> argparse.Namespace:
                    help="A=projector only, B=+decoder LoRA, C=+full decoder, D=all three.")
     p.add_argument("--num-steps", type=int, default=None,
                    help="Override cfg train.num_steps")
+    p.add_argument("--position-mode", choices=["naive", "mrope"], default="naive",
+                   help="naive: standard 0..T-1 position IDs; "
+                        "mrope: M-RoPE-inspired compact image positions.")
     p.add_argument("--output-dir", type=Path, default=None)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     return p.parse_args()
@@ -180,14 +183,16 @@ def main() -> None:
     num_steps = args.num_steps if args.num_steps is not None else cfg["train"]["num_steps"]
 
     if args.output_dir is None:
-        args.output_dir = (
-            Path("runs") / f"vlm_{args.injection}_{args.mask_mode}_{args.freeze_config}"
-        )
+        name = f"vlm_{args.injection}_{args.mask_mode}_{args.freeze_config}"
+        if args.position_mode != "naive":
+            name += f"_{args.position_mode}"
+        args.output_dir = Path("runs") / name
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     device = torch.device(args.device)
     print(f"Device: {device}  |  injection={args.injection}  "
-          f"mask={args.mask_mode}  freeze={args.freeze_config}  steps={num_steps}")
+          f"mask={args.mask_mode}  freeze={args.freeze_config}  steps={num_steps}  "
+          f"position={args.position_mode}")
 
     # ------------------------------------------------------------------
     # 1. Data
@@ -259,7 +264,8 @@ def main() -> None:
         expansion=cfg["projector"]["expansion"],
     ).to(device)
 
-    vlm = VisionLanguageModel(vit, projector, decoder, tokenizer, image_token_id)
+    vlm = VisionLanguageModel(vit, projector, decoder, tokenizer, image_token_id,
+                              position_mode=args.position_mode)
 
     # ------------------------------------------------------------------
     # 5. Freeze configuration
@@ -373,6 +379,7 @@ def main() -> None:
                     "mask_mode": args.mask_mode,
                     "freeze_config": args.freeze_config,
                     "image_token_id": image_token_id,
+                    "position_mode": args.position_mode,
                     "best_val_acc": best_val_acc,
                 }, args.output_dir / "best.pt")
 

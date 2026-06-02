@@ -1,6 +1,7 @@
 \documentclass[11pt]{article}
 
 \usepackage{amsmath, amsfonts, amssymb, amstext, amscd, amsthm, makeidx, graphicx, hyperref, url, enumitem, geometry, booktabs, multirow}
+\usepackage[table]{xcolor}
 
 \newenvironment{question}[1]
     {
@@ -151,6 +152,332 @@
     \end{center}
 
     Accuracy increases monotonically across all seven ranks (32.7\%, 35.3\%, 38.0\%, 41.1\%, 44.4\%, 47.1\%, 49.5\% for $r = 1, 2, 4, 8, 16, 32, 64$), with per-doubling gains of roughly 2.4--3.3 percentage points. The curve is approximately log-linear. In large language models ($d_\text{model} \gg 10^3$), $r = 8$ or $r = 16$ is sufficient because the fine-tuning update is empirically very low-rank relative to the enormous weight matrices---the few most salient adaptation directions capture almost all of the needed shift. Our ViT has $d_\text{model}=384$ and is adapting across a substantial domain gap (10-class EuroSAT satellite imagery $\to$ 45-class RESISC45 aerial imagery), so the effective rank of the update is higher relative to $d_\text{model}$: the model must adjust a broader subspace of its attention projections to separate 45 visually diverse classes, and even $r=64$ (one-sixth of $d_\text{model}$) has not exhausted the useful adaptation directions.
+
+\end{enumerate}
+\end{question}
+
+\begin{question}{Vision-Language Model}
+\begin{enumerate}[label=(\alph*)]
+
+    \item projector: A single linear layer is a fixed affine map whose capacity is entirely spent on rotating and scaling the image-feature subspace into decoder space; it cannot learn curved boundaries between visual-feature clusters, so semantically distinct image regions that land in different parts of the ViT's representation space may still be indistinguishable after projection. A hidden GELU layer introduces nonlinear capacity precisely at the modality boundary, which is critical when both the ViT encoder and the LM decoder are frozen: the projector must single-handedly bridge two independently pretrained representation spaces, and a shallow nonlinearity lets it learn which dimensions of the visual embedding correspond to decoder concepts without altering either frozen model.
+
+    \item injection\_compare: We train three configurations for 2000 steps each (freeze~A: projector only, causal mask), reporting the best validation accuracy on 500 held-out CLEVR examples.
+
+    \begin{center}
+    \begin{tabular}{lrrrr}
+    \toprule
+    Strategy & Val Acc & Vis.\ Tokens & Peak Mem (MB) & Time/step (s) \\
+    \midrule
+    CLS-only prefix     & 26.2\% & 1  & 7\,922.5  & 0.63 \\
+    All-patches prefix  & 14.8\%$^\dagger$ & 65 & 11\,340.9 & 0.74 \\
+    Interleaved         &  1.8\% & 65 & 11\,284.0 & 0.74 \\
+    \bottomrule
+    \multicolumn{5}{l}{\footnotesize $\dagger$~500-step result (overwritten by masking cell; full 2000-step run not recovered).}
+    \end{tabular}
+    \end{center}
+
+    The CLS strategy achieves the highest accuracy (26.2\%) despite providing the least visual information. With only one visual token, the projector needs only to map a single global summary vector into decoder space — a relatively easy one-dimensional problem that 2000 steps is sufficient to solve. The all-patches prefix provides 65 tokens (64 patches $+$ CLS for a $64\!\times\!64$ image with $P\!=\!8$), requiring the projector to learn a useful mapping for 65 spatial positions simultaneously; at 500 steps (cut short by a naming collision with the masking cell), it already reaches 14.8\%, suggesting it would surpass CLS given more training. The interleaved mode persistently fails (1.8\% over 2000 steps): placing 65 visual tokens immediately after BOS violates the frozen decoder's strong prior that BOS is followed by ordinary text, producing chaotic internal representations for the question tokens and preventing coherent generation. These results mirror the \texttt{vit\_pooling} finding — CLS is the weakest representation for spatial tasks in principle, but it offers the simplest optimization target for the projector in a short-training regime, while the patch-based strategies need more steps or decoder adaptation to realise their theoretical advantage.
+
+    \item masking: The two attention masks for a sequence of 4 visual tokens ($v_1$--$v_4$) followed by 3 text tokens ($t_1$--$t_3$) are shown below (shaded cells = allowed positions).
+
+    \textbf{(M1) Fully causal:}
+
+    \begin{center}
+    \setlength{\tabcolsep}{4pt}
+    \begin{tabular}{c|ccccccc}
+     & $v_1$ & $v_2$ & $v_3$ & $v_4$ & $t_1$ & $t_2$ & $t_3$ \\\hline
+    $v_1$ & \cellcolor{gray!35}1 & 0 & 0 & 0 & 0 & 0 & 0 \\
+    $v_2$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 & 0 & 0 & 0 & 0 \\
+    $v_3$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 & 0 & 0 & 0 \\
+    $v_4$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 & 0 & 0 \\
+    $t_1$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 & 0 \\
+    $t_2$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 \\
+    $t_3$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 \\
+    \end{tabular}
+    \end{center}
+
+    \textbf{(M2) Bidirectional image, causal text:}
+
+    \begin{center}
+    \setlength{\tabcolsep}{4pt}
+    \begin{tabular}{c|ccccccc}
+     & $v_1$ & $v_2$ & $v_3$ & $v_4$ & $t_1$ & $t_2$ & $t_3$ \\\hline
+    $v_1$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 & 0 & 0 \\
+    $v_2$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 & 0 & 0 \\
+    $v_3$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 & 0 & 0 \\
+    $v_4$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 & 0 & 0 \\
+    $t_1$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 & 0 \\
+    $t_2$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & 0 \\
+    $t_3$ & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 & \cellcolor{gray!35}1 \\
+    \end{tabular}
+    \end{center}
+
+    M2 is expected to perform better because it preserves the ViT's original bidirectional view of the image: every visual token can aggregate information from all other visual tokens, matching the encoder's design. M1 imposes an arbitrary rasterisation order on 2-D patches, causing earlier patches to have incomplete context and later patches to be influenced by irrelevant earlier patches in the sequence. Additionally, M2 prevents visual tokens from attending to text tokens (which they haven't ``seen'' yet), matching the causal boundary at the image-to-text interface.
+
+    \begin{center}
+    \begin{tabular}{lrr}
+    \toprule
+    Mask mode & Val Acc (500 steps) & Time/step (s) \\
+    \midrule
+    Causal (M1)        & 14.8\% & 0.74 \\
+    Image-bidir (M2)   &  1.4\% & 2.05 \\
+    \bottomrule
+    \end{tabular}
+    \end{center}
+
+    Contrary to the theoretical prediction, causal masking (M1) substantially outperforms image-bidir (M2) at 500 steps in the projector-only setting. With a randomly initialised projector, bidirectional visual self-attention in the decoder mixes 65 uninformative patch embeddings with each other, producing chaotic visual representations; the frozen decoder's attention heads — trained exclusively on causal text sequences — amplify this chaos rather than filtering it. The causal mask is closer to what the frozen decoder was pretrained on, so the question-token representations degrade less. M2 is also 2.77$\times$ slower per step due to SDPA with the custom 4D additive mask. Under a freeze configuration that adapts the decoder (B/C/D), M2's theoretical advantage would likely emerge.
+
+    \item freezing: Using all-patches injection with image-bidir masking, we train four configurations for 1500 steps each.
+
+    \begin{center}
+    \begin{tabular}{llrrrr}
+    \toprule
+    Config & Decoder & Val Acc & Trainable & Peak Mem (MB) & Time/step (s) \\
+    \midrule
+    A: projector only   & frozen      &  1.6\% &      2,066,880 & 11\,340.2 & 2.05 \\
+    B: proj.\ + LoRA    & LoRA $r=8$  & 21.0\% &      2,886,080 & 11\,740.8 & 2.13 \\
+    C: proj.\ + full FT & full FT     & 28.2\% & 363,888,000    & 16\,132.8 & 2.18 \\
+    D: all full FT      & full FT     & 20.8\% & 374,625,792    & 16\,635.2 & 2.25 \\
+    \bottomrule
+    \end{tabular}
+    \end{center}
+
+    Config~C (frozen ViT, full decoder fine-tuning) achieves the best accuracy (28.2\%), confirming that adapting the decoder is the critical bottleneck when the projector-only regime fails. The jump from A to B (1.6\%~$\to$~21.0\%) shows that even sparse LoRA adapters (819,200 extra trainable parameters, 0.22\% of the model) are sufficient to teach the decoder how to process visual-token prefixes, enabling the all-patches representation to realise most of its spatial potential. Full decoder fine-tuning (C, 28.2\%) further improves over LoRA by adjusting every weight in the 363M-parameter SmolLM2 decoder, allowing deeper restructuring of the decoder's internal representations. Config~D (all three components fine-tuned) falls back to 20.8\%: jointly fine-tuning the EuroSAT-pretrained ViT alongside the decoder appears to destabilise the visual encoder within 1500 steps, degrading the patch features that the decoder has just learned to use. Memory scales predictably: frozen decoder (A, B: $\approx$\,11.7~GB) vs.\ full decoder gradients (C, D: $\approx$\,16.4~GB). In the two-stage VLM recipe, A corresponds to Stage~1 (align the projector; cheap) and C to Stage~2 (instruction-tune the decoder; expensive but necessary for strong task performance); B offers a practical middle ground.
+
+    \item vlm\_qualitative: We evaluate the best checkpoint (Config~C, all-patches + image-bidir, 28.2\% overall) on 10 held-out CLEVR examples. Per-type breakdown: exist 56.7\%, compare\_attr 42.9\%, spatial 31.2\%, query\_attr 16.2\%, count 12.9\%.
+
+    \begin{center}
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000041.png}\\[2pt]
+      {\footnotesize \textit{Does the big object behind the cyan matte cylinder have the same material as the big gray object?}\\[1pt]
+      [spatial]\enspace Gold: \textbf{no}\enspace Pred: no\enspace\checkmark}
+    \end{minipage}
+    \hspace{0.04\textwidth}
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000196.png}\\[2pt]
+      {\footnotesize \textit{The rubber object that is the same color as the tiny metal ball is what size?}\\[1pt]
+      [query\_attr]\enspace Gold: \textbf{small}\enspace Pred: small\enspace\checkmark}
+    \end{minipage}
+
+    \medskip
+
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000222.png}\\[2pt]
+      {\footnotesize \textit{Is the number of small rubber spheres behind the small yellow object greater than the number of green things behind the big green cylinder?}\\[1pt]
+      [spatial]\enspace Gold: \textbf{no}\enspace Pred: no\enspace\checkmark}
+    \end{minipage}
+    \hspace{0.04\textwidth}
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000241.png}\\[2pt]
+      {\footnotesize \textit{Are there fewer small purple shiny blocks than cyan matte things?}\\[1pt]
+      [count]\enspace Gold: \textbf{no}\enspace Pred: no\enspace\checkmark}
+    \end{minipage}
+
+    \medskip
+
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000324.png}\\[2pt]
+      {\footnotesize \textit{What number of objects are either big shiny cylinders left of the small yellow metallic block or cyan things right of the small sphere?}\\[1pt]
+      [spatial]\enspace Gold: \textbf{3}\enspace Pred: 3\enspace\checkmark}
+    \end{minipage}
+    \hspace{0.04\textwidth}
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000055.png}\\[2pt]
+      {\footnotesize \textit{How big is the green metal object right of the cube that is right of the tiny thing to the left of the cyan cylinder?}\\[1pt]
+      [spatial]\enspace Gold: \textbf{small}\enspace Pred: 3\enspace\texttimes}
+    \end{minipage}
+
+    \medskip
+
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000149.png}\\[2pt]
+      {\footnotesize \textit{There is a red thing; does it have the same shape as the purple shiny object behind the big green rubber object?}\\[1pt]
+      [spatial]\enspace Gold: \textbf{yes}\enspace Pred: no\enspace\texttimes}
+    \end{minipage}
+    \hspace{0.04\textwidth}
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000259.png}\\[2pt]
+      {\footnotesize \textit{Is the thing behind the small blue object made of the same material as the object to the left of the cube?}\\[1pt]
+      [spatial]\enspace Gold: \textbf{yes}\enspace Pred: no\enspace\texttimes}
+    \end{minipage}
+
+    \medskip
+
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000275.png}\\[2pt]
+      {\footnotesize \textit{How many cylinders are gray metallic objects or red things?}\\[1pt]
+      [count]\enspace Gold: \textbf{2}\enspace Pred: \texttt{: 0}\enspace\texttimes}
+    \end{minipage}
+    \hspace{0.04\textwidth}
+    \begin{minipage}[t]{0.47\textwidth}
+      \centering
+      \includegraphics[width=\textwidth]{../runs/vlm_qualitative/CLEVR_val_000284.png}\\[2pt]
+      {\footnotesize \textit{There is a small object in front of the small object behind the matte object in front of the tiny blue matte thing; what shape is it?}\\[1pt]
+      [spatial]\enspace Gold: \textbf{cylinder}\enspace Pred: sphere\enspace\texttimes}
+    \end{minipage}
+    \end{center}
+
+    The model is strongest on existence and binary attribute-comparison questions (56.7\% and 42.9\%), where a yes/no response can often be derived from coarse scene statistics without precise spatial localisation; it is weakest on counting (12.9\%) and attribute queries (16.2\%), which require identifying specific objects and their properties in a scene the encoder was never pretrained on. Among the five incorrect cases, four (examples 7, 8, 10, and the shape-prediction part of example 6) are plausibly encoder failures: the EuroSAT-pretrained ViT produces patch features calibrated to satellite-image textures and land-use patterns, not to the material, shape, and colour of synthetic 3D objects, so the decoder receives no useful signal to distinguish ``yes'' from ``no'' or ``cylinder'' from ``sphere.'' Example~9 is a decoder failure of a different kind: the prediction ``\texttt{: 0}'' includes a stray colon copied from the ``\texttt{Answer:}'' suffix, suggesting that the answer-only label masking occasionally leaks prompt structure into generation. To disentangle the two failure modes experimentally, one could (a) replace the image with a ground-truth text scene description and measure decoder-only accuracy --- if it is near perfect, the encoder is the bottleneck --- or (b) swap the ViT for a CLIP ViT-L pretrained on natural images and measure the accuracy gain; a large gain implicates the encoder, while a small gain implicates the decoder's limited instruction-following with frozen or lightly adapted weights.
+
+\end{enumerate}
+\end{question}
+
+% ===========================================================================
+\begin{question}{6 Positional Encodings and RoPE}
+\begin{enumerate}[label=\textbf{\arabic*.}]
+
+    \item rope\_1d: RoPE is a rotation applied independently to each
+    $(x_{2i},\,x_{2i+1})$ pair; a 2-D rotation is a norm-preserving map,
+    so the L2 norm of the full $d$-dimensional vector is the root-sum-of-squares
+    of $d/2$ pair norms, each of which is unchanged.
+    Empirically, measuring
+    $\max_{b,h,t}\bigl|\|x_{b,h,t}\|-\|\mathrm{RoPE}(x)_{b,h,t}\|\bigr|$
+    on a random $(2,4,16,64)$ tensor at positions $0\ldots15$ yields a
+    maximum absolute deviation of $\approx 3\times10^{-7}$, consistent with
+    IEEE 754 float32 round-off and confirming the rotation preserves norms
+    to within numerical precision.
+
+    \item rope\_vs\_learned:
+
+    \begin{center}
+    \begin{tabular}{lrr}
+    \toprule
+    Positional encoding & Train-size val acc & Extrap.\ val acc (96$\times$96) \\
+    \midrule
+    Learned PE          & (pending) & (pending) \\
+    1D RoPE             & (pending) & (pending) \\
+    \bottomrule
+    \end{tabular}
+    \end{center}
+
+    Both models are trained CLIP-style on EuroSAT for 20 epochs at $64\times64$
+    ($8\times8=64$ patches) and then evaluated at $96\times96$ ($12\times12=144$
+    patches).
+    For the learned-PE baseline the patch positional embeddings are bilinearly
+    interpolated from the $8\times8$ training grid to the $12\times12$
+    evaluation grid before being added to the patch tokens; the CLS positional
+    embedding is kept unchanged.
+    Learned PE is expected to degrade at the extrapolation size because the
+    model never sees position indices beyond 64 during training, and bilinear
+    interpolation only approximates the learned geometry.
+    1D RoPE should extrapolate more gracefully because its rotation angles are
+    computed from a fixed formula ($\theta_i = 10000^{-2i/d}$) that is
+    well-defined at any position index, and the relative-position property
+    ($q_m\cdot k_n$ depends only on $m-n$) is preserved regardless of absolute
+    position magnitude.
+
+    \item rope\_2d:
+
+    \begin{center}
+    \begin{tabular}{lrr}
+    \toprule
+    Positional encoding & Train-size val acc & Extrap.\ val acc (96$\times$96) \\
+    \midrule
+    Learned PE          & (pending) & (pending) \\
+    1D RoPE             & (pending) & (pending) \\
+    2D RoPE             & (pending) & (pending) \\
+    \bottomrule
+    \end{tabular}
+    \end{center}
+
+    2D RoPE splits the head dimension in half: the first $d/2$ channels rotate
+    by the patch's column index and the second $d/2$ channels by the row index,
+    so the attention dot product between two patches depends on both their
+    horizontal and vertical relative offsets.
+    On EuroSAT, which contains spatially structured land-use patterns (rivers
+    are horizontal, roads diagonal, etc.), the 2D inductive bias is expected to
+    help marginally over 1D RoPE at train size; at the extrapolation size it
+    should remain robust since coordinates are still drawn from the fixed
+    frequency schedule.
+
+    \item mrope\_written:
+
+    \textbf{(1) What goes wrong with naive 1D position IDs?}
+    With naive 1D assignment the 65 visual tokens (CLS at 0, patches at
+    1--64) occupy positions 0--64, pushing the 50 text tokens to positions
+    65--114.
+    (a)~SmolLM2 is trained on text sequences up to 2048 tokens, so positions
+    65--114 are well inside its training distribution for short contexts, but
+    with larger images (e.g.\ LLaVA's $16\times16=256$ patches) text tokens
+    would reach positions 257+, which can exceed practical training lengths and
+    degrade the quality of the decoder's rotary representations for those
+    positions.
+    (b)~More critically, treating the $8\times8$ patch grid as a flat 1D
+    sequence destroys its 2D structure: patch~$(0,0)$ at position~1 appears
+    ``adjacent'' to patch~$(0,1)$ at position~2, but patch~$(7,7)$ at
+    position~64 is also made to appear ``close'' to patch~$(7,6)$ at
+    position~63 while being made ``far'' from patch~$(6,7)$ at position~56,
+    even though those two patches are equally separated in the image.
+    The decoder's RoPE thus cannot distinguish left-right from up-down
+    relations, limiting spatial reasoning.
+
+    \textbf{(2) Under M-RoPE, what position does the first text token get?}
+    In M-RoPE each token carries a 3D position $(t, h, w)$.
+    Image patches at grid cell $(r, c)$ receive $(t=0,\, h=r,\, w=c)$; the
+    temporal index is fixed at 0 for all image tokens.
+    The first text token following the image block gets
+    $(t=G,\, h=G,\, w=G)$, where $G$ is the grid side length (e.g.\ $G=8$
+    for a $64\times64$ image with patch size~8).
+    This choice is sensible for two reasons: first, it ensures text tokens
+    begin at a temporal position strictly greater than any image token's
+    temporal coordinate (0), so the model can unambiguously distinguish visual
+    from linguistic context via the temporal channel; second, text position IDs
+    start at $G$ rather than $G^2+1$ (the naive total), which keeps them
+    squarely within the range the decoder was pretrained on and reduces the
+    effective positional gap between the image and the first generated word.
+
+    \textbf{(3) Why three chunks rather than two?}
+    M-RoPE splits the attention head dimension into three equal chunks, one
+    rotated by $t$, one by $h$, and one by $w$.
+    If the temporal index $t$ were dropped and only $(h,w)$ were used, text
+    tokens would have no natural $(h,w)$ coordinates: they form a 1D sequence,
+    so one common assignment is $(h=i,\, w=i)$ for the $i$-th text token.
+    But this conflates the text's sequential distance with spatial image
+    distance: the relative $(h,w)$ offset between text token $i$ and patch
+    $(r,c)$ would be $(i-r,\, i-c)$, a direction that mixes image rows/columns
+    with text token indices in a semantically meaningless way.
+    The temporal index provides a dedicated channel where text tokens can track
+    their sequential order independently of image coordinates, while image tokens
+    share a fixed $t=0$ that keeps them distinguishable from all text tokens in
+    at least one dimension.
+
+    \item mrope\_impl (bonus):
+
+    \begin{center}
+    \begin{tabular}{lrr}
+    \toprule
+    Position assignment & Overall val acc & Spatial val acc \\
+    \midrule
+    Naive 1D            & (pending) & (pending) \\
+    M-RoPE-style        & (pending) & (pending) \\
+    \bottomrule
+    \end{tabular}
+    \end{center}
+
+    Both models use the best §5 configuration (all-patches injection,
+    image-bidir masking, freeze config~C) and are trained for 1500 steps.
+    In the M-RoPE variant, the CLS token receives position~0; each patch at
+    grid cell $(r,c)$ of an $8\times8$ grid receives position
+    $\max(r,c)+1 \in \{1,\ldots,8\}$; and the $k$-th text token receives
+    position $9+k$.
+    This is implemented by passing custom \texttt{position\_ids} to the
+    decoder's \texttt{forward()} call, overriding SmolLM2's default
+    $0,1,\ldots,T{-}1$ assignment.
+    The key benefit is that text tokens start at position~9 instead of~65,
+    while spatially adjacent patches receive more similar position IDs
+    (reflecting 2D proximity) than under the naive scheme.
+    Whether this compact assignment helps on CLEVR spatial questions will
+    depend on whether the model's capacity bottleneck is the positional
+    encoding or the EuroSAT-pretrained encoder features.
 
 \end{enumerate}
 \end{question}

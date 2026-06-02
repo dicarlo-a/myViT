@@ -100,7 +100,9 @@ def load_vlm(ckpt_path: Path, device: torch.device):
     # VLM
     from vlm.model import VisionLanguageModel
 
-    vlm = VisionLanguageModel(vit, projector, decoder, tokenizer, image_token_id)
+    position_mode = ckpt.get("position_mode", "naive")
+    vlm = VisionLanguageModel(vit, projector, decoder, tokenizer, image_token_id,
+                              position_mode=position_mode)
     vlm.eval()
 
     return vlm, injection, mask_mode

@@ -37,6 +37,7 @@ class VisionLanguageModel(nn.Module):
         decoder: nn.Module,
         tokenizer,
         image_token_id: int | None = None,
+        position_mode: str = "naive",
     ) -> None:
         super().__init__()
         self.vit = vit
@@ -44,6 +45,7 @@ class VisionLanguageModel(nn.Module):
         self.decoder = decoder
         self.tokenizer = tokenizer
         self.image_token_id = image_token_id
+        self.position_mode = position_mode
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -117,6 +119,54 @@ class VisionLanguageModel(nn.Module):
         return inputs_embeds, combined_attn, combined_labels, n_vis
 
     # ------------------------------------------------------------------
+    # M-RoPE position IDs
+    # ------------------------------------------------------------------
+
+    def _build_position_ids(
+        self,
+        n_vis: int,
+        T_total: int,
+        device: torch.device,
+    ) -> torch.Tensor | None:
+        """Build decoder position_ids of shape (1, T_total).
+
+        "naive":  standard 0, 1, 2, ..., T-1 (same as HF default; return None
+                  to let HF handle it).
+        "mrope":  M-RoPE-inspired assignment —
+                  • CLS at position 0.
+                  • Patch at grid (row, col): position max(row, col) + 1.
+                    For an 8×8 grid this maps patches to positions 1..8,
+                    keeping text tokens at low positions (9+) instead of 65+.
+                  • Text token t: position G + 1 + t  (G = grid side length).
+                  For cls-only injection (n_vis=1): CLS at 0, text at 1, 2, ...
+        """
+        if self.position_mode == "naive":
+            return None  # let HuggingFace compute 0,1,...,T-1 by default
+
+        n_text = T_total - n_vis
+
+        if n_vis == 1:
+            # CLS-only injection: CLS at 0, text continues from 1.
+            image_pos = torch.zeros(1, dtype=torch.long, device=device)
+            text_pos = torch.arange(n_text, device=device) + 1
+        else:
+            # all_patches: CLS + N patches where N = n_vis - 1.
+            N = n_vis - 1
+            G = int(N ** 0.5)
+            cls_pos = torch.zeros(1, dtype=torch.long, device=device)
+            rows = torch.arange(G, device=device)
+            cols = torch.arange(G, device=device)
+            grid_r, grid_c = torch.meshgrid(rows, cols, indexing="ij")
+            # Patch at (r, c) gets position max(r, c) + 1.
+            patch_pos = torch.maximum(grid_r, grid_c).flatten() + 1  # (N,)
+            image_pos = torch.cat([cls_pos, patch_pos])               # (n_vis,)
+            max_pos = int(image_pos.max().item())
+            text_pos = torch.arange(n_text, device=device) + max_pos + 1
+
+        all_pos = torch.cat([image_pos, text_pos])   # (T_total,)
+        return all_pos.unsqueeze(0)                  # (1, T_total)
+
+    # ------------------------------------------------------------------
     # Forward
     # ------------------------------------------------------------------
 
@@ -149,7 +199,11 @@ class VisionLanguageModel(nn.Module):
                 vis_tokens, text_embeds, attention_mask, labels
             )
 
-        # 4. Build attention mask for the decoder.
+        # 4. Build position IDs (M-RoPE or default naive).
+        T_total = inputs_embeds.shape[1]
+        position_ids = self._build_position_ids(n_vis, T_total, images.device)
+
+        # 5. Build attention mask for the decoder.
         if mask_mode == "image_bidir" and injection != "interleaved":
             B = images.shape[0]
             n_text = attention_mask.shape[1]
@@ -168,12 +222,14 @@ class VisionLanguageModel(nn.Module):
             decoder_out = self.decoder(
                 inputs_embeds=inputs_embeds,
                 attention_mask=struct_mask,
+                position_ids=position_ids,
                 labels=combined_labels,
             )
         else:
             decoder_out = self.decoder(
                 inputs_embeds=inputs_embeds,
                 attention_mask=combined_attn,
+                position_ids=position_ids,
                 labels=combined_labels,
             )
 
@@ -233,10 +289,12 @@ class VisionLanguageModel(nn.Module):
             combined_attn = torch.cat([vis_attn, attn_mask], dim=1)
 
         n_input = inputs_embeds.shape[1]
+        position_ids = self._build_position_ids(n_vis, n_input, device)
 
         output_ids = self.decoder.generate(
             inputs_embeds=inputs_embeds,
             attention_mask=combined_attn,
+            position_ids=position_ids,
             max_new_tokens=max_new_tokens,
             pad_token_id=self.tokenizer.eos_token_id,
             **gen_kwargs,

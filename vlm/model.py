@@ -232,6 +232,8 @@ class VisionLanguageModel(nn.Module):
             vis_attn = torch.ones(B, n_vis, device=device, dtype=attn_mask.dtype)
             combined_attn = torch.cat([vis_attn, attn_mask], dim=1)
 
+        n_input = inputs_embeds.shape[1]
+
         output_ids = self.decoder.generate(
             inputs_embeds=inputs_embeds,
             attention_mask=combined_attn,
@@ -239,5 +241,11 @@ class VisionLanguageModel(nn.Module):
             pad_token_id=self.tokenizer.eos_token_id,
             **gen_kwargs,
         )
+
+        # HF may return [dummy_input_ids | generated_ids] when inputs_embeds is
+        # used.  If the output is longer than max_new_tokens, the extra prefix
+        # is the dummy input representation — strip it.
+        if output_ids.shape[1] > max_new_tokens:
+            output_ids = output_ids[:, n_input:]
 
         return self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)

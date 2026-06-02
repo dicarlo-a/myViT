@@ -138,8 +138,7 @@ def main() -> None:
         pbar = tqdm(train_dl, desc=f"Epoch {epoch:02d}/{cfg['train']['num_epochs']}", leave=False)
         for images, captions in pbar:
             images = images.to(device)
-            with torch.no_grad():
-                text_embeds = text_encoder(captions)
+            text_embeds = text_encoder(captions).clone()
 
             img_feats = vit(images)
             img_proj, txt_proj = proj_heads(img_feats, text_embeds)

@@ -353,8 +353,8 @@
     \toprule
     Positional encoding & Train-size val acc & Extrap.\ val acc (96$\times$96) \\
     \midrule
-    Learned PE          & (pending) & (pending) \\
-    1D RoPE             & (pending) & (pending) \\
+    Learned PE          & 92.33\% & 81.37\% \\
+    1D RoPE             & 92.20\% & 79.46\% \\
     \bottomrule
     \end{tabular}
     \end{center}
@@ -375,6 +375,23 @@
     ($q_m\cdot k_n$ depends only on $m-n$) is preserved regardless of absolute
     position magnitude.
 
+    At train size both methods perform nearly identically (92.33\% vs.\ 92.20\%),
+    confirming that the positional encoding choice is not a bottleneck for
+    in-distribution accuracy.
+    At the extrapolation size, learned PE (81.37\%) somewhat surprisingly
+    outperforms 1D RoPE (79.46\%) by about 1.9 points.
+    A likely explanation is that EuroSAT land-use patterns are locally smooth,
+    so bilinear interpolation of the $8\times8$ learned embeddings to a
+    $12\times12$ grid preserves the coarse positional structure well enough for
+    the classification task; the overall accuracy drop ($\approx$\,11 pp) is
+    driven by the larger number of patches and the resulting longer input
+    sequence rather than by the encoding strategy itself.
+    1D RoPE's slight disadvantage may stem from treating all 145 tokens (CLS $+$
+    144 patches) as a flat 1D sequence: the absolute positions 0--144 are within
+    the cosine/sine cache range, but the model was never trained to rely on
+    relative distances larger than 64, so the learned query--key dot-products
+    do not generalise perfectly to longer offsets.
+
     \item rope\_2d:
 
     \begin{center}
@@ -382,9 +399,9 @@
     \toprule
     Positional encoding & Train-size val acc & Extrap.\ val acc (96$\times$96) \\
     \midrule
-    Learned PE          & (pending) & (pending) \\
-    1D RoPE             & (pending) & (pending) \\
-    2D RoPE             & (pending) & (pending) \\
+    Learned PE          & 92.33\% & 81.37\% \\
+    1D RoPE             & 92.20\% & 79.46\% \\
+    2D RoPE             & 92.70\% & 81.68\% \\
     \bottomrule
     \end{tabular}
     \end{center}
@@ -398,6 +415,20 @@
     help marginally over 1D RoPE at train size; at the extrapolation size it
     should remain robust since coordinates are still drawn from the fixed
     frequency schedule.
+
+    2D RoPE achieves the highest train-size accuracy (92.70\%) and the best
+    extrapolation accuracy (81.68\%), in line with both predictions.
+    The advantage at train size is modest ($<$\,0.5 pp over learned PE) but
+    consistent with the 2D positional bias matching EuroSAT's spatially
+    structured imagery.
+    At extrapolation, 2D RoPE surpasses learned PE (81.37\%) by 0.3 pp and
+    outperforms 1D RoPE (79.46\%) by 2.2 pp, confirming that encoding
+    row and column positions independently generalises better to a larger grid
+    than flattening patches into a 1D sequence.
+    All three methods experience a roughly 10--13 pp accuracy drop moving from
+    $64\times64$ to $96\times96$, suggesting the dominant cost is distributional
+    shift (more patches, different receptive field) rather than the specific
+    positional encoding.
 
     \item mrope\_written:
 
@@ -457,8 +488,8 @@
     \toprule
     Position assignment & Overall val acc & Spatial val acc \\
     \midrule
-    Naive 1D            & (pending) & (pending) \\
-    M-RoPE-style        & (pending) & (pending) \\
+    Naive 1D            & 28.8\% & 31.2\% \\
+    M-RoPE-style        &  3.2\% &  6.4\% \\
     \bottomrule
     \end{tabular}
     \end{center}
@@ -472,12 +503,32 @@
     This is implemented by passing custom \texttt{position\_ids} to the
     decoder's \texttt{forward()} call, overriding SmolLM2's default
     $0,1,\ldots,T{-}1$ assignment.
-    The key benefit is that text tokens start at position~9 instead of~65,
-    while spatially adjacent patches receive more similar position IDs
-    (reflecting 2D proximity) than under the naive scheme.
-    Whether this compact assignment helps on CLEVR spatial questions will
-    depend on whether the model's capacity bottleneck is the positional
-    encoding or the EuroSAT-pretrained encoder features.
+
+    The M-RoPE variant collapses to near-chance performance (3.2\% overall,
+    6.4\% spatial), dramatically worse than the naive baseline (28.8\% / 31.2\%).
+    The failure has a clear cause: SmolLM2 was pretrained exclusively with
+    monotonically increasing, unique position IDs ($0,1,2,\ldots$), so passing
+    non-monotonic and non-unique IDs is entirely out-of-distribution.
+    In the M-RoPE scheme, all $8\times8=64$ patches are mapped to only 8 distinct
+    positions (1--8), meaning up to 7 patches share the same position ID; the
+    decoder's rotary key and query vectors for those patches become identical in
+    the positional component, making them indistinguishable from each other.
+    Furthermore, the decoder's causal generation of text tokens starts at
+    position~9, so from the model's perspective a single attention ``step''
+    jumps from position~8 to position~9 (the first text token), while the
+    preceding 56 visual tokens are all compressed into positions 1--8.
+    This destroys the sequential structure the decoder depends on and prevents
+    meaningful cross-attention between text questions and visual features.
+
+    True M-RoPE as implemented in Qwen-VL avoids this by (a) training the
+    backbone from scratch with 3D positional chunks so repeated spatial IDs
+    are never seen alongside the text stream, and (b) using separate head-dim
+    partitions for temporal, height, and width positions so that the text
+    position channel is always strictly increasing.
+    Approximating M-RoPE by simply overriding \texttt{position\_ids} in a
+    pretrained 1D-RoPE decoder is therefore insufficient; it requires either
+    a model pretrained with multi-dimensional positions or a full
+    fine-tuning regime that can overcome the distributional mismatch.
 
 \end{enumerate}
 \end{question}
